@@ -4,6 +4,8 @@ from botocore.exceptions import ClientError
 from ask_sdk_core.skill_builder import SkillBuilder
 from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_model import ui
+from decimal import Decimal
+import time
 
 dynamoDB = boto3.resource('dynamodb', region_name='us-west-2')
 dynamoTable = dynamoDB.Table('hiveDB')
@@ -63,13 +65,21 @@ def statechange_intent_handler(handler_input):
             speech_output = "Eco mode is already on."
         else:
             toggle_eco_mode_status("1", True)
+            record_start_time("1")
             speech_output = "Ok, turning on Eco mode."
     elif "off" in state or "deactivate" in state:
         if not eco_mode_on:
             speech_output = "Eco mode is already off."
         else:
             toggle_eco_mode_status("1", False)
-            speech_output = "Ok, turning off Eco mode."
+            elapsed_time = get_eco_mode_running_time("1")
+            #TODO: Calculate this from API
+            total_energy_saved = 0.00187470492884 * elapsed_time
+            increment_total_energy_saved("1", total_energy_saved)
+            m, s = divmod(elapsed_time, 60)
+            h, m = divmod(m, 60)
+            speech_output = (
+                    "Ok, turning off Eco mode. It ran for {} {} {}, saving a total of {:.2f} kilowatt hours.".format(str(h) + " hours, " if h > 0 else "", str(m) + " minutes and" if m > 0 else "", str(s) + " seconds" if s > 0 else "", total_energy_saved))
 
     response_builder.set_card(
         ui.StandardCard(
@@ -103,8 +113,9 @@ def request_information_intent_handler(handler_input):
     elif "notification" in information:
         speech_output = "You have 1 notification: Your weekly energy report is ready. Would you like you hear it?"
     elif "total" in information or "energy save" in information:
-        speech_output = "Your total energy saved using eco mode is 2 kilowatt hours. That's equivalent to leaving a" \
-                        "standard 60 watt light bulb on for 1 day. "
+        total_energy = get_total_energy_saved("1")
+        speech_output = "Your total energy saved using eco mode is {:.2f} kilowatt hours. That's equivalent to leaving a" \
+                        "standard 60 watt light bulb on for 3 days. ".format(total_energy)
     elif "tier" in information or "tear" in information:
         speech_output = "You are currently a Platinum tier energy saver. With 2 kilowatt hours saved in total, " \
                         "this puts you in the top 3% of energy savers in your area. "
@@ -189,6 +200,68 @@ def toggle_eco_mode_status(userid, toggle):
         UpdateExpression="set EcoModeOn = :e",
         ExpressionAttributeValues={
             ':e': toggle
+        },
+        ReturnValues="UPDATED_NEW"
+    )
+
+
+def record_start_time(userid):
+    current_epoch = int(time.time())
+
+    response = dynamoTable.update_item(
+        Key={
+            'UserId': userid
+        },
+        UpdateExpression="set LastEcoModeActivation = :e",
+        ExpressionAttributeValues={
+            ':e': current_epoch
+        },
+        ReturnValues="UPDATED_NEW"
+    )
+
+
+def get_eco_mode_running_time(userid):
+    current_epoch = time.time()
+    last_activation = 0
+
+    try:
+        response = dynamoTable.get_item(
+            Key={
+                'UserId': userid
+            }
+        )
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+    else:
+        last_activation = response['Item']['LastEcoModeActivation']
+
+    elapsed_time = int(current_epoch) - int(last_activation)
+    return elapsed_time
+
+def get_total_energy_saved(userid):
+    try:
+        response = dynamoTable.get_item(
+            Key={
+                'UserId': userid
+            }
+        )
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+    else:
+        return response['Item']['TotalEnergySaved']
+
+
+def increment_total_energy_saved(userid, energy_saved):
+    # Hack because dynamoDB doesn't like floats
+    formatted_energy_saved = Decimal(str(round(energy_saved, 2)))
+
+    response = dynamoTable.update_item(
+        Key={
+            'UserId': userid
+        },
+        UpdateExpression="set TotalEnergySaved = TotalEnergySaved + :e",
+        ExpressionAttributeValues={
+            ':e': formatted_energy_saved
         },
         ReturnValues="UPDATED_NEW"
     )
