@@ -1,3 +1,4 @@
+# coding=utf-8
 from __future__ import print_function  # Python 2/3 compatibility
 import boto3
 from botocore.exceptions import ClientError
@@ -6,6 +7,7 @@ from ask_sdk_core.utils import is_request_type, is_intent_name
 from ask_sdk_model import ui
 from decimal import Decimal
 import time
+import random
 
 dynamoDB = boto3.resource('dynamodb', region_name='us-west-2')
 dynamoTable = dynamoDB.Table('hiveDB')
@@ -27,6 +29,56 @@ FALLBACK_REPROMPT = "Fallback re-prompt"
 # Intents / Slots
 STATE_SLOT = "State"
 INFORMATION_SLOT = "InformationCategory"
+
+# Conversion Rates
+INCANDESCENT_LIGHTBULB_KWH_DAY = Decimal(1.44)
+INCANDESCENT_LIGHTBULB_KWH_HOUR = Decimal(0.06)
+INCANDESCENT_LIGHTBULB_KWH_MINUTE = Decimal(0.001)
+
+# Energy Saving Tips
+ENERGY_SAVING_TIPS = [
+    "Air dry dishes instead of using your dishwasher’s drying cycle. Just open the door after the rinse cycle and let "
+    "Mother Nature do the rest. If you run your dishes in the evening, you can wake up to dry dishes without a single "
+    "kilowatt being used. Doing this can cut dishwasher energy use 15-50%, depending on the machine.",
+
+    "Lower the thermostat on your water heater to 120°F. The potential annual savings for every 10ºF you reduce the "
+    "temperature is 12 to 30 dollars.",
+
+    "Wash only full loads of dishes and clothes. Use cold water instead of hot or warm to save even more energy.",
+
+    "Insulate heating ducts. In a typical house 20-30% of the air moving through the duct system is lost due to leaks.",
+
+    "Plug home electronics into power strips and turn the power strips off when the plugged in equipment is not in use.",
+
+    "Install low-flow showerheads. For maximum water efficiency, select a showerhead with a flow rate of less than "
+    "2.5 gpm.",
+
+    "Use Energy Star-qualified CFL and LED bulbs. These LEDs and CFLs use 20-25% of the energy of traditional "
+    "incandescent bulbs.",
+
+    "Turn off incandescent lights when you are not in the room. 90% of the energy they use is given off as heat, "
+    "and only about 10% results in light.",
+
+    "Install a programmable thermostat to lower utility bills and manage your heating and cooling systems "
+    "efficiently. Turning your thermostat back 10°-15° for 8 hours can save 5%-15% a year on your heating bill.",
+
+    "Seal air leaks. Sealing air leaks can result in up to 30% energy savings, according to energy.gov.",
+
+    "Add an insulating blanket to older water heaters. This could reduce standby heat losses by 25%–45% and save "
+    "about 4%–9% in water heating costs.",
+
+    "Older appliances are often less energy efficient. Replace them with ENERGY STAR products.",
+
+    "Use microwaves and toaster ovens to cook or warm leftovers. You’ll use less energy than cooking with a "
+    "conventional oven.",
+
+    "Clean/replace filters in furnace. Energy.gov recommends changing the filter every 3 months. A dirty filter slows "
+    "down air flow and makes the system work harder.",
+
+    "Avoid using the rinse hold setting on your dishwasher. This feature uses 3-7 more gallons of hot water per use.",
+
+    "Take shorter showers. A typical shower head spits out an average of 2.5 gallons per minute. Reducing your shower "
+    "time by 4 minutes per day may save 3650 gallons annually if you shower once a day."]
 
 # -- Variables -- #
 sb = SkillBuilder()
@@ -73,24 +125,29 @@ def statechange_intent_handler(handler_input):
         else:
             toggle_eco_mode_status("1", False)
             elapsed_time = get_eco_mode_running_time("1")
-            #TODO: Calculate this from API
+            # TODO: Calculate this from API
             total_energy_saved = 0.00187470492884 * elapsed_time
             increment_total_energy_saved("1", total_energy_saved)
             m, s = divmod(elapsed_time, 60)
             h, m = divmod(m, 60)
             speech_output = (
-                    "Ok, turning off Eco mode. It ran for {} {} {}, saving a total of {:.2f} kilowatt hours.".format(str(h) + " hours, " if h > 0 else "", str(m) + " minutes and" if m > 0 else "", str(s) + " seconds" if s > 0 else "", total_energy_saved))
+                "Ok, turning off Eco mode. It ran for {} {} {}, saving a total of {:.2f} kilowatt hours.".format(
+                    str(h) + " hours, " if h > 0 else "", str(m) + " minutes and" if m > 0 else "",
+                    str(s) + " seconds" if s > 0 else "", total_energy_saved))
 
     response_builder.set_card(
         ui.StandardCard(
             title=SKILL_NAME,
-            text=speech_output  # ,
+            text=speech_output,  # ,
             # TODO: image=ui.Image(
             #    small_image_url="<Small Image URL>",
             #    large_image_url="<Large Image URL>"
             # )
         )
     )
+
+    # TODO: Remove once we're handling session attributes
+    response_builder.set_should_end_session(False)
 
     response_builder.speak(speech_output).ask("Reprompt here.")
     return response_builder.response
@@ -107,15 +164,71 @@ def request_information_intent_handler(handler_input):
             "%s can't find the requested information. Try asking about suggestions, or your tier status." % SKILL_NAME)
 
     if "tip" in information or "suggestion" in information:
-        speech_output = "Try washing your clothes with cold water. Using warm or hot water " \
-                        "takes about 4.5 kilowatt hours per load while using cold water takes about 0.3 kilowatt " \
-                        "hours per load. Would you like to hear more? "
+        random_index = random.randint(0, 15)
+        speech_output = ENERGY_SAVING_TIPS[random_index]
     elif "notification" in information:
         speech_output = "You have 1 notification: Your weekly energy report is ready. Would you like you hear it?"
     elif "total" in information or "energy save" in information:
         total_energy = get_total_energy_saved("1")
-        speech_output = "Your total energy saved using eco mode is {:.2f} kilowatt hours. That's equivalent to leaving a" \
-                        "standard 60 watt light bulb on for 3 days. ".format(total_energy)
+
+        days_energy_saved = 0
+        hours_energy_saved = 0
+        minutes_energy_saved = 0
+
+        # Could've used divmod here too ¯\_(ツ)_/¯
+        if total_energy > INCANDESCENT_LIGHTBULB_KWH_DAY:
+            days_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_DAY)
+            days_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_DAY)
+
+            hours_remainder = 0
+            if days_remainder > INCANDESCENT_LIGHTBULB_KWH_HOUR:
+                hours_energy_saved = Decimal(days_remainder / INCANDESCENT_LIGHTBULB_KWH_HOUR)
+                hours_remainder = Decimal(days_remainder % INCANDESCENT_LIGHTBULB_KWH_HOUR)
+            if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+                minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+        elif total_energy > INCANDESCENT_LIGHTBULB_KWH_HOUR:
+            hours_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_HOUR)
+            hours_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_HOUR)
+
+            if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+                minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+        elif total_energy > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+            minutes_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+        if total_energy < 0.01:
+            speech_output = "You haven't saved enough energy for us to track it. Keep saving!"
+        else:
+            days_energy_saved = int(days_energy_saved)
+            hours_energy_saved = int(hours_energy_saved)
+            minutes_energy_saved = int(minutes_energy_saved)
+
+            if days_energy_saved == 1:
+                day_quantifier = "day"
+            else:
+                day_quantifier = "days"
+
+            if hours_energy_saved == 1:
+                hour_quantifier = "hour"
+            else:
+                hour_quantifier = "hours"
+
+            if minutes_energy_saved == 1:
+                minute_quantifier = "minute"
+            else:
+                minute_quantifier = "minutes"
+
+            speech_output = "Your total energy saved using eco mode is {:.2f} kilowatt hours. That's like leaving a " \
+                            "60 watt light bulb on for {} {} {}. ".format(total_energy,
+                                                                          str(
+                                                                              days_energy_saved) + " " + day_quantifier + " " if days_energy_saved > 0 else "",
+                                                                          str(
+
+                                                                              hours_energy_saved) + " " + hour_quantifier + " " if hours_energy_saved > 0 else "",
+                                                                          str(
+
+                                                                              minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
     elif "tier" in information or "tear" in information:
         speech_output = "You are currently a Platinum tier energy saver. With 2 kilowatt hours saved in total, " \
                         "this puts you in the top 3% of energy savers in your area. "
@@ -135,6 +248,9 @@ def request_information_intent_handler(handler_input):
             # )
         )
     )
+
+    # TODO: Remove once we're handling session attributes
+    response_builder.set_should_end_session(False)
 
     response_builder.speak(speech_output).ask("Reprompt here.")
     return response_builder.response
@@ -237,6 +353,7 @@ def get_eco_mode_running_time(userid):
 
     elapsed_time = int(current_epoch) - int(last_activation)
     return elapsed_time
+
 
 def get_total_energy_saved(userid):
     try:
