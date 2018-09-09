@@ -19,12 +19,10 @@ SKILL_NAME = "Hive"
 HELP_MESSAGE_VERBOSE = (
         "Welcome to %s, you can start by asking to run your devices in eco mode, energy saving tips, "
         "and track your energy usage in comparison to people living in your area. " % SKILL_NAME)
-HELP_MESSAGE = ("Welcome to the %s." % SKILL_NAME)
-HELP_REPROMPT = "Help re-prompt"
+LAUNCH_MESSAGE = ("Welcome to %s." % SKILL_NAME)
+HELP_REPROMPT_MESSAGE = "re-prompt here"
 STOP_CANCEL_MESSAGE = ("Thanks for using %s." % SKILL_NAME)
 EXCEPTION_MESSAGE = ("Sorry, there was some problem with %s. Please try again." % SKILL_NAME)
-FALLBACK_MESSAGE = "Fallback message"
-FALLBACK_REPROMPT = "Fallback re-prompt"
 
 # Intents / Slots
 STATE_SLOT = "State"
@@ -93,12 +91,21 @@ def request_logger(handler_input):
 def launch_request_handler(handler_input):
     print("launch_request_handler {}".format(handler_input.request_envelope.request))
 
-    # Handler for Skill Launch
-    speech = ("Welcome to the %s." % SKILL_NAME)
+    response_builder = handler_input.response_builder
 
-    handler_input.response_builder.speak(
-        speech + " " + HELP_MESSAGE).ask(HELP_MESSAGE)
-    return handler_input.response_builder.response
+    # TODO: Only do the below two lines if user is on Echo Spot or Echo Show
+    total_energy = get_hive_table_item("1").get('TotalEnergySaved')
+    energy_usage_info = get_total_energy_usage_information(total_energy)
+
+    response_builder.set_card(
+        ui.StandardCard(
+            title=SKILL_NAME,
+            text=LAUNCH_MESSAGE + " Here's your energy report:\n\n" + energy_usage_info
+        )
+    )
+
+    response_builder.speak(LAUNCH_MESSAGE).ask("Reprompt here.")
+    return response_builder.response
 
 
 @sb.request_handler(can_handle_func=is_intent_name("StateChange"))
@@ -107,27 +114,26 @@ def statechange_intent_handler(handler_input):
 
     state = handler_input.request_envelope.request.intent.slots[STATE_SLOT].value
     response_builder = handler_input.response_builder
-    eco_mode_on = get_eco_mode_status("1")
+    eco_mode_status = get_hive_table_item("1")
 
     speech_output = (
             "%s can't find the requested information. Try asking about suggestions, or your tier status." % SKILL_NAME)
 
     if "on" in state or "activate" in state:
-        if eco_mode_on:
+        if eco_mode_status.get('EcoModeOn'):
             speech_output = "Eco mode is already on."
         else:
-            toggle_eco_mode_status("1", True)
-            record_start_time("1")
+            update_hive_table_item("1", True, int(time.time()), 0)
             speech_output = "Ok, turning on Eco mode."
     elif "off" in state or "deactivate" in state:
-        if not eco_mode_on:
+        if not eco_mode_status.get('EcoModeOn'):
             speech_output = "Eco mode is already off."
         else:
-            toggle_eco_mode_status("1", False)
-            elapsed_time = get_eco_mode_running_time("1")
+            elapsed_time = get_eco_mode_running_time(eco_mode_status.get('LastEcoModeActivation'))
             # TODO: Calculate this from API
             total_energy_saved = 0.00187470492884 * elapsed_time
-            increment_total_energy_saved("1", total_energy_saved)
+            update_hive_table_item("1", False, 0, Decimal(str(round(total_energy_saved, 2))))
+
             m, s = divmod(elapsed_time, 60)
             h, m = divmod(m, 60)
             speech_output = (
@@ -145,9 +151,6 @@ def statechange_intent_handler(handler_input):
             # )
         )
     )
-
-    # TODO: Remove once we're handling session attributes
-    response_builder.set_should_end_session(False)
 
     response_builder.speak(speech_output).ask("Reprompt here.")
     return response_builder.response
@@ -169,71 +172,13 @@ def request_information_intent_handler(handler_input):
     elif "notification" in information:
         speech_output = "You have 1 notification: Your weekly energy report is ready. Would you like you hear it?"
     elif "total" in information or "energy save" in information:
-        total_energy = get_total_energy_saved("1")
-
-        days_energy_saved = 0
-        hours_energy_saved = 0
-        minutes_energy_saved = 0
-
-        # Could've used divmod here too ¯\_(ツ)_/¯
-        if total_energy > INCANDESCENT_LIGHTBULB_KWH_DAY:
-            days_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_DAY)
-            days_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_DAY)
-
-            hours_remainder = 0
-            if days_remainder > INCANDESCENT_LIGHTBULB_KWH_HOUR:
-                hours_energy_saved = Decimal(days_remainder / INCANDESCENT_LIGHTBULB_KWH_HOUR)
-                hours_remainder = Decimal(days_remainder % INCANDESCENT_LIGHTBULB_KWH_HOUR)
-            if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
-                minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
-
-        elif total_energy > INCANDESCENT_LIGHTBULB_KWH_HOUR:
-            hours_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_HOUR)
-            hours_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_HOUR)
-
-            if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
-                minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
-
-        elif total_energy > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
-            minutes_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
-
-        if total_energy < 0.01:
-            speech_output = "You haven't saved enough energy for us to track it. Keep saving!"
-        else:
-            days_energy_saved = int(days_energy_saved)
-            hours_energy_saved = int(hours_energy_saved)
-            minutes_energy_saved = int(minutes_energy_saved)
-
-            if days_energy_saved == 1:
-                day_quantifier = "day"
-            else:
-                day_quantifier = "days"
-
-            if hours_energy_saved == 1:
-                hour_quantifier = "hour"
-            else:
-                hour_quantifier = "hours"
-
-            if minutes_energy_saved == 1:
-                minute_quantifier = "minute"
-            else:
-                minute_quantifier = "minutes"
-
-            speech_output = "Your total energy saved using eco mode is {:.2f} kilowatt hours. That's like leaving a " \
-                            "60 watt light bulb on for {} {} {}. ".format(total_energy,
-                                                                          str(
-                                                                              days_energy_saved) + " " + day_quantifier + " " if days_energy_saved > 0 else "",
-                                                                          str(
-
-                                                                              hours_energy_saved) + " " + hour_quantifier + " " if hours_energy_saved > 0 else "",
-                                                                          str(
-
-                                                                              minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
+        total_energy = get_hive_table_item("1").get('TotalEnergySaved')
+        speech_output = get_total_energy_usage_information(total_energy)
     elif "tier" in information or "tear" in information:
         speech_output = "You are currently a Platinum tier energy saver. With 2 kilowatt hours saved in total, " \
                         "this puts you in the top 3% of energy savers in your area. "
     elif "eco mode" in information or "session" in information:
-        if get_eco_mode_status("1") is True:
+        if get_hive_table_item("1").get('EcoModeOn') is True:
             speech_output = "Eco mode is on. Would you like to turn it off?"
         else:
             speech_output = "Eco mode is off. Would you like to turn it on?"
@@ -249,9 +194,6 @@ def request_information_intent_handler(handler_input):
         )
     )
 
-    # TODO: Remove once we're handling session attributes
-    response_builder.set_should_end_session(False)
-
     response_builder.speak(speech_output).ask("Reprompt here.")
     return response_builder.response
 
@@ -260,7 +202,7 @@ def request_information_intent_handler(handler_input):
 def help_intent_handler(handler_input):
     print("help_intent_handler {}".format(handler_input.request_envelope.request))
 
-    handler_input.response_builder.speak(HELP_MESSAGE).ask(HELP_MESSAGE)
+    handler_input.response_builder.speak(HELP_MESSAGE_VERBOSE).ask(HELP_REPROMPT_MESSAGE)
     return handler_input.response_builder.response
 
 
@@ -294,8 +236,8 @@ def session_ended_request_handler(handler_input):
 handler = sb.lambda_handler()
 
 
-# Custom function definitions
-def get_eco_mode_status(userid):
+# DynamoDB data retrieval/updating
+def get_hive_table_item(userid):
     try:
         response = dynamoTable.get_item(
             Key={
@@ -305,87 +247,105 @@ def get_eco_mode_status(userid):
     except ClientError as e:
         print(e.response['Error']['Message'])
     else:
-        return response['Item']['EcoModeOn']
+        ret = {
+            'CurrentEnergyUsage': response['Item']['CurrentEnergyUsage'],
+            'CurrentTier': response['Item']['CurrentTier'],
+            'EcoModeOn': response['Item']['EcoModeOn'],
+            'LastEcoModeActivation': response['Item']['LastEcoModeActivation'],
+            'TotalEnergySaved': response['Item']['TotalEnergySaved']
+
+        }
+        return ret
 
 
-def toggle_eco_mode_status(userid, toggle):
+def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved):
+    if current_time == 0 and energy_saved == 0:
+        update_expression = "set EcoModeOn = :e"
+        expression_attrs = {
+            ':e': eco_mode_toggle
+        }
+    else:
+        update_expression = "set EcoModeOn = :e, LastEcoModeActivation = :f, TotalEnergySaved = " \
+                            "TotalEnergySaved + :g "
+        expression_attrs = {
+            ':e': eco_mode_toggle,
+            ':f': current_time,
+            ':g': energy_saved
+        }
+
     response = dynamoTable.update_item(
         Key={
             'UserId': userid
         },
-        UpdateExpression="set EcoModeOn = :e",
-        ExpressionAttributeValues={
-            ':e': toggle
-        },
+        UpdateExpression=update_expression,
+        ExpressionAttributeValues=expression_attrs,
         ReturnValues="UPDATED_NEW"
     )
 
 
-def record_start_time(userid):
-    current_epoch = int(time.time())
-
-    response = dynamoTable.update_item(
-        Key={
-            'UserId': userid
-        },
-        UpdateExpression="set LastEcoModeActivation = :e",
-        ExpressionAttributeValues={
-            ':e': current_epoch
-        },
-        ReturnValues="UPDATED_NEW"
-    )
-
-
-def get_eco_mode_running_time(userid):
+# Helper functions
+def get_eco_mode_running_time(last_activation):
     current_epoch = time.time()
-    last_activation = 0
-
-    try:
-        response = dynamoTable.get_item(
-            Key={
-                'UserId': userid
-            }
-        )
-    except ClientError as e:
-        print(e.response['Error']['Message'])
-    else:
-        last_activation = response['Item']['LastEcoModeActivation']
-
     elapsed_time = int(current_epoch) - int(last_activation)
     return elapsed_time
 
 
-def get_total_energy_saved(userid):
-    try:
-        response = dynamoTable.get_item(
-            Key={
-                'UserId': userid
-            }
-        )
-    except ClientError as e:
-        print(e.response['Error']['Message'])
+def get_total_energy_usage_information(total_energy):
+    days_energy_saved = 0
+    hours_energy_saved = 0
+    minutes_energy_saved = 0
+
+    # Could've used divmod here too ¯\_(ツ)_/¯
+    if total_energy > INCANDESCENT_LIGHTBULB_KWH_DAY:
+        days_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_DAY)
+        days_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_DAY)
+
+        hours_remainder = 0
+        if days_remainder > INCANDESCENT_LIGHTBULB_KWH_HOUR:
+            hours_energy_saved = Decimal(days_remainder / INCANDESCENT_LIGHTBULB_KWH_HOUR)
+            hours_remainder = Decimal(days_remainder % INCANDESCENT_LIGHTBULB_KWH_HOUR)
+        if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+            minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+    elif total_energy > INCANDESCENT_LIGHTBULB_KWH_HOUR:
+        hours_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_HOUR)
+        hours_remainder = Decimal(total_energy % INCANDESCENT_LIGHTBULB_KWH_HOUR)
+
+        if hours_remainder > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+            minutes_energy_saved = Decimal(hours_remainder / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+    elif total_energy > INCANDESCENT_LIGHTBULB_KWH_MINUTE:
+        minutes_energy_saved = Decimal(total_energy / INCANDESCENT_LIGHTBULB_KWH_MINUTE)
+
+    if total_energy < 0.01:
+        return "You haven't saved enough energy for us to track it just yet. Keep saving!"
     else:
-        return response['Item']['TotalEnergySaved']
+        days_energy_saved = int(days_energy_saved)
+        hours_energy_saved = int(hours_energy_saved)
+        minutes_energy_saved = int(minutes_energy_saved)
 
+        if days_energy_saved == 1:
+            day_quantifier = "day"
+        else:
+            day_quantifier = "days"
 
-def increment_total_energy_saved(userid, energy_saved):
-    # Hack because dynamoDB doesn't like floats
-    formatted_energy_saved = Decimal(str(round(energy_saved, 2)))
+        if hours_energy_saved == 1:
+            hour_quantifier = "hour"
+        else:
+            hour_quantifier = "hours"
 
-    response = dynamoTable.update_item(
-        Key={
-            'UserId': userid
-        },
-        UpdateExpression="set TotalEnergySaved = TotalEnergySaved + :e",
-        ExpressionAttributeValues={
-            ':e': formatted_energy_saved
-        },
-        ReturnValues="UPDATED_NEW"
-    )
+        if minutes_energy_saved == 1:
+            minute_quantifier = "minute"
+        else:
+            minute_quantifier = "minutes"
 
-#    for x in response:
-#        print (x)
-#        for y in response[x]:
-#            print (y,':',response[x][y])
+        return "Your total energy saved using eco mode is {:.2f} kilowatt hours. That's like leaving a " \
+               "60 watt light bulb on for {} {} {}. ".format(total_energy,
+                                                             str(
+                                                                 days_energy_saved) + " " + day_quantifier + " " if days_energy_saved > 0 else "",
+                                                             str(
 
-# -------Refactor
+                                                                 hours_energy_saved) + " " + hour_quantifier + " " if hours_energy_saved > 0 else "",
+                                                             str(
+
+                                                                 minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
