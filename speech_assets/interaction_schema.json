@@ -1,0 +1,254 @@
+{
+    "interactionModel": {
+        "languageModel": {
+            "invocationName": "hive",
+            "intents": [
+                {
+                    "name": "AMAZON.FallbackIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.CancelIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.HelpIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.StopIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.NavigateHomeIntent",
+                    "samples": []
+                },
+                {
+                    "name": "StateChange",
+                    "slots": [
+                        {
+                            "name": "State",
+                            "type": "STATE_CHANGE"
+                        },
+                        {
+                            "name": "Mode",
+                            "type": "MODE"
+                        }
+                    ],
+                    "samples": [
+                        "{State} {Mode}"
+                    ]
+                },
+                {
+                    "name": "RequestInformation",
+                    "slots": [
+                        {
+                            "name": "Request",
+                            "type": "REQUEST"
+                        },
+                        {
+                            "name": "InformationCategory",
+                            "type": "INFORMATION_CATEGORY"
+                        }
+                    ],
+                    "samples": [
+                        "{Request} {InformationCategory}"
+                    ]
+                },
+                {
+                    "name": "AMAZON.MoreIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.NavigateSettingsIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.NextIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.PageUpIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.PageDownIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.PreviousIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.ScrollRightIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.ScrollDownIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.ScrollLeftIntent",
+                    "samples": []
+                },
+                {
+                    "name": "AMAZON.ScrollUpIntent",
+                    "samples": []
+                },
+                {
+                    "name": "Summary",
+                    "slots": [],
+                    "samples": [
+                        "How am I doing"
+                    ]
+                },
+                {
+                    "name": "YesIntent",
+                    "slots": [],
+                    "samples": [
+                        "yes please",
+                        "yes"
+                    ]
+                },
+                {
+                    "name": "NoIntent",
+                    "slots": [],
+                    "samples": [
+                        "no thank you",
+                        "no"
+                    ]
+                }
+            ],
+            "types": [
+                {
+                    "name": "STATE_CHANGE",
+                    "values": [
+                        {
+                            "id": "OFF",
+                            "name": {
+                                "value": "off",
+                                "synonyms": [
+                                    "to deactivate",
+                                    "deactivate",
+                                    "to turn off",
+                                    "turn off"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "ON",
+                            "name": {
+                                "value": "on",
+                                "synonyms": [
+                                    "to activate",
+                                    "activate",
+                                    "to turn on",
+                                    "turn on"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "REQUEST",
+                    "values": [
+                        {
+                            "name": {
+                                "value": "about",
+                                "synonyms": [
+                                    "to give me",
+                                    "what's my",
+                                    "what are my",
+                                    "what is my",
+                                    "what's",
+                                    "tell me about my",
+                                    "tell me about",
+                                    "to give me a",
+                                    "give me a",
+                                    "give me",
+                                    "for a",
+                                    "for my",
+                                    "for"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "MODE",
+                    "values": [
+                        {
+                            "id": "ECO",
+                            "name": {
+                                "value": "eco",
+                                "synonyms": [
+                                    "energy saver mode",
+                                    "eco mode"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "INFORMATION_CATEGORY",
+                    "values": [
+                        {
+                            "id": "TIP",
+                            "name": {
+                                "value": "suggestions",
+                                "synonyms": [
+                                    "energy saving suggestion",
+                                    "suggestion",
+                                    "energy saving tip",
+                                    "tips",
+                                    "an energy saving tip",
+                                    "energy saving tips",
+                                    "energy saving suggestions"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "SAVED",
+                            "name": {
+                                "value": "energy saved",
+                                "synonyms": [
+                                    "total energy saved",
+                                    "energy have I saved",
+                                    "energy usage",
+                                    "usage",
+                                    "running total",
+                                    "energy savings",
+                                    "current energy saved"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "TIER",
+                            "name": {
+                                "value": "tier",
+                                "synonyms": [
+                                    "current tear",
+                                    "tear status",
+                                    "tear",
+                                    "current tier",
+                                    "tier status"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "ECO",
+                            "name": {
+                                "value": "eco",
+                                "synonyms": [
+                                    "eco mode running",
+                                    "eco mode",
+                                    "energy saver"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
