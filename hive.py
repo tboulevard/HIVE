@@ -8,6 +8,7 @@ from ask_sdk_model import ui
 from decimal import Decimal
 import time
 import random
+import requests
 
 dynamoDB = boto3.resource('dynamodb', region_name='us-west-2')
 dynamoTable = dynamoDB.Table('hiveDB')
@@ -20,8 +21,6 @@ HELP_MESSAGE_VERBOSE = (
         "You can start by asking to run your devices in ECO mode, by saying 'turn on eco mode'. %s will "
         "automatically track your total energy saved, all you need to do is ask 'How am I doing' to hear it" % SKILL_NAME)
 LAUNCH_MESSAGE = ("Welcome to %s." % SKILL_NAME)
-# LAUNCH_REPROMPT = ("If you want more fine grained information about your energy usage, you can try asking %s to give "
-#                    "you an energy report over the past week or month.", SKILL_NAME)
 HELP_REPROMPT_MESSAGE = "You can try asking HIVE to turn on eco mode, how am I doing, what's my tier status, " \
                         "or simply ask energy saving tips "
 STOP_CANCEL_MESSAGE = ("Thanks for using %s." % SKILL_NAME)
@@ -40,6 +39,11 @@ INCANDESCENT_LIGHTBULB_KWH_MINUTE = Decimal(0.001)
 # Session slot keys
 CURR_INTENT_SLOT_KEY = "summary_intent_key"
 SUMMARY_SLOT_VALUE = "summary"
+TIPS_SLOT_VALUE = "tips"
+ECO_SLOT_VALUE = "eco"
+
+# API
+API_TOKEN = "Token f5315ad7ca5b2d2637de37732d47c139b21eb4fc"
 
 # Energy Saving Tips
 ENERGY_SAVING_TIPS = [
@@ -132,7 +136,7 @@ def statechange_intent_handler(handler_input):
         if eco_mode_status.get('EcoModeOn'):
             speech_output = "Eco mode is already on."
         else:
-            update_hive_table_item("1", True, int(time.time()), 0)
+            toggle_eco_mode(True, 0)
             speech_output = "Ok, turning on Eco mode."
     elif "OFF" == state:
         if not eco_mode_status.get('EcoModeOn'):
@@ -140,7 +144,7 @@ def statechange_intent_handler(handler_input):
         else:
             elapsed_time = get_eco_mode_running_time(eco_mode_status.get('LastEcoModeActivation'))
             total_energy_saved = calculate_total_energy_saved(elapsed_time)
-            update_hive_table_item("1", False, 0, Decimal(str(round(total_energy_saved, 2))))
+            toggle_eco_mode(False, total_energy_saved)
 
             m, s = divmod(elapsed_time, 60)
             h, m = divmod(m, 60)
@@ -174,7 +178,7 @@ def request_information_intent_handler(handler_input):
 
     if information_category_id == "TIP":
         random_index = random.randint(0, 15)
-        speech_output = ENERGY_SAVING_TIPS[random_index]
+        speech_output = ENERGY_SAVING_TIPS[random_index] + " Provided by blog.constellation.com."
     elif information_category_id == "SAVED":
         total_energy = get_hive_table_item("1").get('TotalEnergySaved')
         speech_output = "Your total energy saved is " + get_energy_usage_information(total_energy)
@@ -197,8 +201,11 @@ def request_information_intent_handler(handler_input):
                     str(s) + " seconds" if s > 0 else ""))
             speech_output = run_time_info + " " + energy_saved_info
         else:
-            # TODO: Use session attrs to handle turning on from this intent
             speech_output = "Eco mode is off. Would you like to turn it on?"
+            handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = ECO_SLOT_VALUE
+    elif information_category_id == "POW":
+        current_power_usage = Decimal(send_get_powermeter_request()) / 1000
+        speech_output = "You are currently using {:.2f} kilowatt hours".format(current_power_usage)
 
     response_builder.set_card(
         ui.StandardCard(
@@ -247,11 +254,14 @@ def yes_intent_handler(handler_input):
     if CURR_INTENT_SLOT_KEY in handler_input.attributes_manager.session_attributes:
         last_intent = handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY]
         if last_intent == SUMMARY_SLOT_VALUE:
-            speech_output = "Last week you used 3.1 kilowatt hours, this week you used 2.8 kilowatt hours. If you " \
-                            "want to learn more about saving energy, trying asking for energy saving tips. "
-            reprompt = "reprompt here"
-        elif last_intent == "something_else":
-            speech_output = "Do something else here"
+            speech_output = "Last week you used 3.1 kilowatt hours, this week you used 2.8 kilowatt hours. Would you " \
+                            "like a suggestion to help you reduce your energy usage? "
+            handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = TIPS_SLOT_VALUE
+        elif last_intent == TIPS_SLOT_VALUE:
+            speech_output = get_random_energy_saving_tip()
+        elif last_intent == ECO_SLOT_VALUE:
+            toggle_eco_mode(True, 0)
+            speech_output = "Ok, turning on Eco mode."
 
     response_builder.set_card(
         ui.StandardCard(
@@ -368,6 +378,14 @@ def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved):
 
 
 # Helper functions
+def toggle_eco_mode(eco_mode_state, total_energy_saved):
+    # TODO: Make actual call to API to toggle state
+    if eco_mode_state:
+        update_hive_table_item("1", eco_mode_state, int(time.time()), 0)
+    else:
+        update_hive_table_item("1", eco_mode_state, 0, Decimal(str(round(total_energy_saved, 2))))
+
+
 def get_eco_mode_running_time(last_activation):
     current_epoch = time.time()
     elapsed_time = int(current_epoch) - int(last_activation)
@@ -377,6 +395,11 @@ def get_eco_mode_running_time(last_activation):
 def calculate_total_energy_saved(elapsed_time):
     # TODO: Calculate this from API
     return 0.00187470492884 * elapsed_time
+
+
+def get_random_energy_saving_tip():
+    random_index = random.randint(0, 15)
+    return ENERGY_SAVING_TIPS[random_index]
 
 
 def get_energy_usage_information(total_energy):
@@ -415,28 +438,57 @@ def get_energy_usage_information(total_energy):
         hours_energy_saved = int(hours_energy_saved)
         minutes_energy_saved = int(minutes_energy_saved)
 
+        day_quantifier = "day"
+        hour_quantifier = "hour"
+        minute_quantifier = "minute"
+
         if days_energy_saved == 1:
             day_quantifier = "day"
-        else:
+            hours_energy_saved = 0
+            minutes_energy_saved = 0
+        elif days_energy_saved > 1:
             day_quantifier = "days"
+            hours_energy_saved = 0
+            minutes_energy_saved = 0
 
         if hours_energy_saved == 1:
             hour_quantifier = "hour"
-        else:
+            minutes_energy_saved = 0
+        elif hours_energy_saved > 1:
             hour_quantifier = "hours"
+            minutes_energy_saved = 0
 
         if minutes_energy_saved == 1:
             minute_quantifier = "minute"
-        else:
+        elif minutes_energy_saved > 1:
             minute_quantifier = "minutes"
 
         return "{:.2f} kilowatt hours. That's like leaving a " \
-               "60 watt light bulb on for {} {} {}. ".format(total_energy,
-                                                             str(
-                                                                 days_energy_saved) + " " + day_quantifier + "," if days_energy_saved > 0 else "",
-                                                             str(
+               "60 watt light bulb on for {}{}{}. ".format(total_energy,
+                                                           str(
+                                                               days_energy_saved) + " " + day_quantifier if days_energy_saved > 0 else "",
+                                                           str(
 
-                                                                 hours_energy_saved) + " " + hour_quantifier + ", and" if hours_energy_saved > 0 else "",
-                                                             str(
+                                                               hours_energy_saved) + " " + hour_quantifier if hours_energy_saved > 0 else "",
+                                                           str(
 
-                                                                 minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
+                                                               minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
+
+
+# API Requests
+def send_get_powermeter_request():
+    try:
+        response = requests.get(
+            url="https://peahivemobilebackends.azurewebsites.net/api/v2.0/devices/powermeter/",
+            headers={
+                "Authorization": API_TOKEN,
+                "Cookie": "ARRAffinity=ed046e026d44c6574298f9d5b1427792d762e4003b0fb8dca735c275a2959304",
+            },
+        )
+        print('Response HTTP Status Code: {status_code}'.format(
+            status_code=response.status_code))
+        print('Response HTTP Response Body: {content}'.format(
+            content=response.content))
+        return response.json().get('powermeters')[0].get('grid_activepower')
+    except requests.exceptions.RequestException:
+        print('HTTP Request failed')
