@@ -257,6 +257,9 @@
                             "name": {
                                 "value": "eco",
                                 "synonyms": [
+                                    "eco mode status",
+                                    "current eco mode session",
+                                    "eco mode session",
                                     "eco mode running",
                                     "eco mode",
                                     "energy saver"

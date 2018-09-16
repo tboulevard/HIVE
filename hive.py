@@ -220,7 +220,7 @@ def request_information_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask(get_random_reprompt)
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -320,7 +320,7 @@ def cancel_and_stop_intent_handler(handler_input):
 def all_exception_handler(handler_input, exception):
     print("Encountered following exception: {}".format(exception))
 
-    handler_input.response_builder.speak(EXCEPTION_MESSAGE).ask(EXCEPTION_MESSAGE)
+    handler_input.response_builder.speak(EXCEPTION_MESSAGE)
 
     return handler_input.response_builder.response
 
