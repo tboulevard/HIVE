@@ -99,6 +99,7 @@
                     "name": "Summary",
                     "slots": [],
                     "samples": [
+                        "How I'm doing",
                         "How am I doing"
                     ]
                 },
@@ -106,6 +107,7 @@
                     "name": "YesIntent",
                     "slots": [],
                     "samples": [
+                        "sure",
                         "yeah",
                         "oh hell yeah",
                         "yes please",
@@ -116,6 +118,7 @@
                     "name": "NoIntent",
                     "slots": [],
                     "samples": [
+                        "nah",
                         "nope",
                         "oh hell no",
                         "no thank you",

@@ -21,10 +21,17 @@ HELP_MESSAGE_VERBOSE = (
         "You can start by asking to run your devices in ECO mode, by saying 'turn on eco mode'. %s will "
         "automatically track your total energy saved, all you need to do is ask 'How am I doing' to hear it" % SKILL_NAME)
 LAUNCH_MESSAGE = ("Welcome to %s." % SKILL_NAME)
-HELP_REPROMPT_MESSAGE = "You can try asking HIVE to turn on eco mode, how am I doing, what's my tier status, " \
-                        "or simply ask energy saving tips "
+HELP_REPROMPT_MESSAGE = "You can try asking HIVE to turn on eco mode, ask how am I doing, what's my tier status, " \
+                        "or simply ask for energy saving tips "
 STOP_CANCEL_MESSAGE = ("Thanks for using %s." % SKILL_NAME)
 EXCEPTION_MESSAGE = ("Sorry, there was some problem with %s. Please try again." % SKILL_NAME)
+
+# Re-prompts
+RE_PROMPTS = [
+    "You can try asking about your current eco mode session.",
+    "Try asking for an energy saving suggestion.",
+    ("Ask, 'How am I doing' to get a summary of your energy usage since you started using %s" % SKILL_NAME)
+]
 
 # Intents / Slots
 STATE_SLOT = "State"
@@ -72,7 +79,7 @@ ENERGY_SAVING_TIPS = [
     "Install a programmable thermostat to lower utility bills and manage your heating and cooling systems "
     "efficiently. Turning your thermostat back 10°-15° for 8 hours can save 5%-15% a year on your heating bill.",
 
-    "Seal air leaks. Sealing air leaks can result in up to 30% energy savings, according to energy.gov.",
+    "Sealing air leaks can result in up to 30% energy savings, according to energy.gov.",
 
     "Add an insulating blanket to older water heaters. This could reduce standby heat losses by 25%–45% and save "
     "about 4%–9% in water heating costs.",
@@ -115,7 +122,7 @@ def launch_request_handler(handler_input):
         )
     )
 
-    response_builder.speak(LAUNCH_MESSAGE).ask("reprompt here")
+    response_builder.speak(LAUNCH_MESSAGE).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -160,7 +167,7 @@ def statechange_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask("Reprompt here.")
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -177,8 +184,7 @@ def request_information_intent_handler(handler_input):
             "%s can't find the requested information." % SKILL_NAME)
 
     if information_category_id == "TIP":
-        random_index = random.randint(0, 15)
-        speech_output = ENERGY_SAVING_TIPS[random_index] + " Provided by blog.constellation.com."
+        speech_output = get_random_energy_saving_tip()
     elif information_category_id == "SAVED":
         total_energy = get_hive_table_item("1").get('TotalEnergySaved')
         speech_output = "Your total energy saved is " + get_energy_usage_information(total_energy)
@@ -214,7 +220,7 @@ def request_information_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask("Reprompt here.")
+    response_builder.speak(speech_output).ask(get_random_reprompt)
     return response_builder.response
 
 
@@ -287,7 +293,7 @@ def no_intent_handler(handler_input):
         response_builder.set_should_end_session(True)
         response_builder.speak(speech_output)
     else:
-        response_builder.speak(speech_output).ask("reprompt here.")
+        response_builder.speak(speech_output).ask(get_random_reprompt())
 
     return response_builder.response
 
@@ -399,7 +405,11 @@ def calculate_total_energy_saved(elapsed_time):
 
 def get_random_energy_saving_tip():
     random_index = random.randint(0, 15)
-    return ENERGY_SAVING_TIPS[random_index]
+    return "From blog.constellation.com: " + ENERGY_SAVING_TIPS[random_index]
+
+
+def get_random_reprompt():
+    return RE_PROMPTS[random.randint(0, 2)]
 
 
 def get_energy_usage_information(total_energy):
