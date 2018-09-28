@@ -8,29 +8,41 @@ from ask_sdk_model import ui
 from decimal import Decimal
 import time
 import random
+import requests
+import json
+from datetime import datetime, timedelta
 
 dynamoDB = boto3.resource('dynamodb', region_name='us-west-2')
 dynamoTable = dynamoDB.Table('hiveDB')
 
 # -- Constants -- #
 SKILL_NAME = "Hive"
+HOURS_IN_WEEK = Decimal(168.0)
 
 # Speech output
 HELP_MESSAGE_VERBOSE = (
         "You can start by asking to run your devices in ECO mode, by saying 'turn on eco mode'. %s will "
         "automatically track your total energy saved, all you need to do is ask 'How am I doing' to hear it" % SKILL_NAME)
 LAUNCH_MESSAGE = ("Welcome to %s." % SKILL_NAME)
-# LAUNCH_REPROMPT = ("If you want more fine grained information about your energy usage, you can try asking %s to give "
-#                    "you an energy report over the past week or month.", SKILL_NAME)
-HELP_REPROMPT_MESSAGE = "You can try asking HIVE to turn on eco mode, how am I doing, what's my tier status, " \
-                        "or simply ask energy saving tips "
+HELP_REPROMPT_MESSAGE = "You can try asking HIVE to turn on eco mode, ask how am I doing, what's my tier status, " \
+                        "or simply ask for energy saving tips "
 STOP_CANCEL_MESSAGE = ("Thanks for using %s." % SKILL_NAME)
 EXCEPTION_MESSAGE = ("Sorry, there was some problem with %s. Please try again." % SKILL_NAME)
+
+# Re-prompts
+RE_PROMPTS = [
+    "You can try asking about your current eco mode session.",
+    "Try asking for an energy saving suggestion.",
+    ("Try asking, 'How am I doing' to get a summary of your energy usage since you started using %s" % SKILL_NAME),
+    ("Be sure to set your air conditioner temperature to your liking. %s is constantly learning and will adapt to "
+     "your specific settings." % SKILL_NAME)
+]
 
 # Intents / Slots
 STATE_SLOT = "State"
 MODE_SLOT = "Mode"
 INFORMATION_SLOT = "InformationCategory"
+TEMPERATURE_SLOT = "temperatureNum"
 
 # Conversion Rates
 INCANDESCENT_LIGHTBULB_KWH_DAY = Decimal(1.44)
@@ -40,6 +52,13 @@ INCANDESCENT_LIGHTBULB_KWH_MINUTE = Decimal(0.001)
 # Session slot keys
 CURR_INTENT_SLOT_KEY = "summary_intent_key"
 SUMMARY_SLOT_VALUE = "summary"
+TIPS_SLOT_VALUE = "tips"
+ECO_SLOT_VALUE = "eco"
+
+# API
+BASE_URL = "https://peahivemobilebackends.azurewebsites.net/api/v2.0/"
+API_TOKEN = "Token f5315ad7ca5b2d2637de37732d47c139b21eb4fc"
+COOKIE = "ARRAffinity=ed046e026d44c6574298f9d5b1427792d762e4003b0fb8dca735c275a2959304"
 
 # Energy Saving Tips
 ENERGY_SAVING_TIPS = [
@@ -68,7 +87,7 @@ ENERGY_SAVING_TIPS = [
     "Install a programmable thermostat to lower utility bills and manage your heating and cooling systems "
     "efficiently. Turning your thermostat back 10°-15° for 8 hours can save 5%-15% a year on your heating bill.",
 
-    "Seal air leaks. Sealing air leaks can result in up to 30% energy savings, according to energy.gov.",
+    "Sealing air leaks can result in up to 30% energy savings, according to energy.gov.",
 
     "Add an insulating blanket to older water heaters. This could reduce standby heat losses by 25%–45% and save "
     "about 4%–9% in water heating costs.",
@@ -111,7 +130,7 @@ def launch_request_handler(handler_input):
         )
     )
 
-    response_builder.speak(LAUNCH_MESSAGE).ask("reprompt here")
+    response_builder.speak(LAUNCH_MESSAGE).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -132,22 +151,26 @@ def statechange_intent_handler(handler_input):
         if eco_mode_status.get('EcoModeOn'):
             speech_output = "Eco mode is already on."
         else:
-            update_hive_table_item("1", True, int(time.time()), 0)
-            speech_output = "Ok, turning on Eco mode."
+            if toggle_eco_mode(True, 0, 0):
+                speech_output = "Ok, turning on Eco mode."
+            else:
+                speech_output = "%s had a problem processing your request. Please try again."
     elif "OFF" == state:
         if not eco_mode_status.get('EcoModeOn'):
             speech_output = "Eco mode is already off."
         else:
             elapsed_time = get_eco_mode_running_time(eco_mode_status.get('LastEcoModeActivation'))
             total_energy_saved = calculate_total_energy_saved(elapsed_time)
-            update_hive_table_item("1", False, 0, Decimal(str(round(total_energy_saved, 2))))
 
-            m, s = divmod(elapsed_time, 60)
-            h, m = divmod(m, 60)
-            speech_output = (
-                "Ok, turning off Eco mode. It ran for {} {} {}, saving a total of {:.2f} kilowatt hours.".format(
-                    str(h) + " hours, " if h > 0 else "", str(m) + " minutes and" if m > 0 else "",
-                    str(s) + " seconds" if s > 0 else "", total_energy_saved))
+            if toggle_eco_mode(False, total_energy_saved, elapsed_time):
+                m, s = divmod(elapsed_time, 60)
+                h, m = divmod(m, 60)
+                speech_output = (
+                    "Ok, turning off Eco mode. It ran for {} {} {}, saving a total of {:.2f} kilowatt hours.".format(
+                        str(h) + " hours, " if h > 0 else "", str(m) + " minutes and" if m > 0 else "",
+                        str(s) + " seconds" if s > 0 else "", total_energy_saved))
+            else:
+                speech_output = "%s had a problem processing your request. Please try again."
 
     response_builder.set_card(
         ui.StandardCard(
@@ -156,7 +179,7 @@ def statechange_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask("Reprompt here.")
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -173,14 +196,14 @@ def request_information_intent_handler(handler_input):
             "%s can't find the requested information." % SKILL_NAME)
 
     if information_category_id == "TIP":
-        random_index = random.randint(0, 15)
-        speech_output = ENERGY_SAVING_TIPS[random_index]
+        speech_output = get_random_energy_saving_tip()
     elif information_category_id == "SAVED":
         total_energy = get_hive_table_item("1").get('TotalEnergySaved')
         speech_output = "Your total energy saved is " + get_energy_usage_information(total_energy)
     elif information_category_id == "TIER":
-        speech_output = "You are currently a Platinum tier energy saver. With 2 kilowatt hours saved in total, " \
-                        "this puts you in the top 3% of energy savers in your area. "
+        total_energy = get_hive_table_item("1").get('TotalEnergySaved')
+        speech_output = "You are currently a Platinum tier energy saver. With {:.2f} kilowatt hours saved in total, " \
+                        "this puts you in the top 3% of energy savers in your area.".format(total_energy)
     elif information_category_id == "ECO":
         if get_hive_table_item("1").get('EcoModeOn') is True:
 
@@ -197,8 +220,14 @@ def request_information_intent_handler(handler_input):
                     str(s) + " seconds" if s > 0 else ""))
             speech_output = run_time_info + " " + energy_saved_info
         else:
-            # TODO: Use session attrs to handle turning on from this intent
             speech_output = "Eco mode is off. Would you like to turn it on?"
+            handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = ECO_SLOT_VALUE
+    elif information_category_id == "POW":
+        current_power_usage = Decimal(send_get_powermeter_request()) / 1000
+        speech_output = "You are currently using {:.2f} kilowatts. Would you like to know how much energy you've used " \
+                        "in the past week?".format(current_power_usage)
+
+        handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = SUMMARY_SLOT_VALUE
 
     response_builder.set_card(
         ui.StandardCard(
@@ -207,7 +236,7 @@ def request_information_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask("Reprompt here.")
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -218,11 +247,11 @@ def summary_intent_handler(handler_input):
     response_builder = handler_input.response_builder
 
     total_energy = get_hive_table_item("1").get('TotalEnergySaved')
-    energy_usage_info = get_energy_usage_information(total_energy)
 
     handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = SUMMARY_SLOT_VALUE
 
-    speech_output = "Your total energy saved is " + energy_usage_info + "Would you like to hear more?"
+    speech_output = "Your total energy saved is {:.2f} kilowatt hours. Would you like to hear more detailed " \
+                    "information about your usage?".format(total_energy)
 
     response_builder.set_card(
         ui.StandardCard(
@@ -242,16 +271,37 @@ def yes_intent_handler(handler_input):
     response_builder = handler_input.response_builder
 
     speech_output = ("Sorry, %s couldn't fulfill your request. Please try again." % SKILL_NAME)
-    reprompt = HELP_REPROMPT_MESSAGE
 
     if CURR_INTENT_SLOT_KEY in handler_input.attributes_manager.session_attributes:
         last_intent = handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY]
         if last_intent == SUMMARY_SLOT_VALUE:
-            speech_output = "Last week you used 3.1 kilowatt hours, this week you used 2.8 kilowatt hours. If you " \
-                            "want to learn more about saving energy, trying asking for energy saving tips. "
-            reprompt = "reprompt here"
-        elif last_intent == "something_else":
-            speech_output = "Do something else here"
+            data = send_get_historical_data_request(7)
+            num_elements = len(data)
+            total_power = 0
+            for i in data:
+                watts = i.get('gridvoltage') * i.get('gridcurrent')
+                total_power += watts
+
+            print("Total power: " + str(total_power))
+
+            avg_power = Decimal((total_power / num_elements) / 1000)
+
+            print("Avg power: " + str(avg_power))
+
+            avg_energy_week = avg_power * HOURS_IN_WEEK
+
+            print("Avg energy week: " + str(avg_energy_week))
+
+            energy_usage_info = get_energy_usage_information(avg_energy_week)
+
+            speech_output = "Over the past week you used {} Would you " \
+                            "like a suggestion to help you reduce your energy usage?".format(energy_usage_info)
+            handler_input.attributes_manager.session_attributes[CURR_INTENT_SLOT_KEY] = TIPS_SLOT_VALUE
+        elif last_intent == TIPS_SLOT_VALUE:
+            speech_output = get_random_energy_saving_tip()
+        elif last_intent == ECO_SLOT_VALUE:
+            toggle_eco_mode(True, 0, 0)
+            speech_output = "Ok, turning on Eco mode."
 
     response_builder.set_card(
         ui.StandardCard(
@@ -260,7 +310,7 @@ def yes_intent_handler(handler_input):
         )
     )
 
-    response_builder.speak(speech_output).ask(reprompt)
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -277,8 +327,50 @@ def no_intent_handler(handler_input):
         response_builder.set_should_end_session(True)
         response_builder.speak(speech_output)
     else:
-        response_builder.speak(speech_output).ask("reprompt here.")
+        response_builder.speak(speech_output).ask(get_random_reprompt())
 
+    response_builder.set_card(
+        ui.StandardCard(
+            title=SKILL_NAME,
+            text=speech_output
+        )
+    )
+
+    return response_builder.response
+
+
+@sb.request_handler(can_handle_func=is_intent_name("SetTemperatureIntent"))
+def set_temperature_intent_handler(handler_input):
+    print("set_temperature_intent_handler {}".format(handler_input.request_envelope.request))
+
+    response_builder = handler_input.response_builder
+
+    status_code = \
+    handler_input.request_envelope.request.intent.slots[TEMPERATURE_SLOT].resolutions.resolutions_per_authority[
+        0].status.code
+
+    print("Status code: " + str(status_code))
+
+    is_match = str(status_code) == 'StatusCode.ER_SUCCESS_MATCH'
+
+    speech_output = ("Sorry, %s couldn't set the temperature. Please give a temperature between 16 and 28 degrees "
+                     "celsius." % SKILL_NAME)
+
+    if is_match:
+        temp_id = \
+        handler_input.request_envelope.request.intent.slots[TEMPERATURE_SLOT].resolutions.resolutions_per_authority[
+            0].values[0].value.id
+        if send_post_control_temp_request(temp_id):
+            speech_output = ("Ok. {} set your air conditioner to {} degrees celsius.".format(SKILL_NAME, temp_id))
+
+    response_builder.set_card(
+        ui.StandardCard(
+            title=SKILL_NAME,
+            text=speech_output
+        )
+    )
+
+    response_builder.speak(speech_output).ask(get_random_reprompt())
     return response_builder.response
 
 
@@ -304,7 +396,7 @@ def cancel_and_stop_intent_handler(handler_input):
 def all_exception_handler(handler_input, exception):
     print("Encountered following exception: {}".format(exception))
 
-    handler_input.response_builder.speak(EXCEPTION_MESSAGE).ask(EXCEPTION_MESSAGE)
+    handler_input.response_builder.speak(EXCEPTION_MESSAGE)
 
     return handler_input.response_builder.response
 
@@ -342,7 +434,7 @@ def get_hive_table_item(userid):
         return ret
 
 
-def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved):
+def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved, elapsed_time):
     if current_time == 0 and energy_saved == 0:
         update_expression = "set EcoModeOn = :e"
         expression_attrs = {
@@ -350,11 +442,12 @@ def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved):
         }
     else:
         update_expression = "set EcoModeOn = :e, LastEcoModeActivation = :f, TotalEnergySaved = " \
-                            "TotalEnergySaved + :g "
+                            "TotalEnergySaved + :g, TotalEcoModeTimeSeconds = TotalEcoModeTimeSeconds + :s "
         expression_attrs = {
             ':e': eco_mode_toggle,
             ':f': current_time,
-            ':g': energy_saved
+            ':g': energy_saved,
+            ':s': elapsed_time
         }
 
     response = dynamoTable.update_item(
@@ -368,6 +461,22 @@ def update_hive_table_item(userid, eco_mode_toggle, current_time, energy_saved):
 
 
 # Helper functions
+def toggle_eco_mode(eco_mode_state, total_energy_saved, elapsed_time):
+    # TODO: Make actual call to API to toggle state
+    if eco_mode_state:
+        if send_toggle_eco_mode_request(eco_mode_state):
+            update_hive_table_item("1", eco_mode_state, int(time.time()), 0, 0)
+            return True
+        else:
+            return False
+    else:
+        if send_toggle_eco_mode_request(eco_mode_state):
+            update_hive_table_item("1", eco_mode_state, 0, Decimal(str(round(total_energy_saved, 2))), elapsed_time)
+            return True
+        else:
+            return False
+
+
 def get_eco_mode_running_time(last_activation):
     current_epoch = time.time()
     elapsed_time = int(current_epoch) - int(last_activation)
@@ -377,6 +486,15 @@ def get_eco_mode_running_time(last_activation):
 def calculate_total_energy_saved(elapsed_time):
     # TODO: Calculate this from API
     return 0.00187470492884 * elapsed_time
+
+
+def get_random_energy_saving_tip():
+    random_index = random.randint(0, 15)
+    return "From blog.constellation.com: " + ENERGY_SAVING_TIPS[random_index]
+
+
+def get_random_reprompt():
+    return RE_PROMPTS[random.randint(0, 2)]
 
 
 def get_energy_usage_information(total_energy):
@@ -415,28 +533,156 @@ def get_energy_usage_information(total_energy):
         hours_energy_saved = int(hours_energy_saved)
         minutes_energy_saved = int(minutes_energy_saved)
 
+        day_quantifier = "day"
+        hour_quantifier = "hour"
+        minute_quantifier = "minute"
+
         if days_energy_saved == 1:
             day_quantifier = "day"
-        else:
+            hours_energy_saved = 0
+            minutes_energy_saved = 0
+        elif days_energy_saved > 1:
             day_quantifier = "days"
+            hours_energy_saved = 0
+            minutes_energy_saved = 0
 
         if hours_energy_saved == 1:
             hour_quantifier = "hour"
-        else:
+            minutes_energy_saved = 0
+        elif hours_energy_saved > 1:
             hour_quantifier = "hours"
+            minutes_energy_saved = 0
 
         if minutes_energy_saved == 1:
             minute_quantifier = "minute"
-        else:
+        elif minutes_energy_saved > 1:
             minute_quantifier = "minutes"
 
         return "{:.2f} kilowatt hours. That's like leaving a " \
-               "60 watt light bulb on for {} {} {}. ".format(total_energy,
-                                                             str(
-                                                                 days_energy_saved) + " " + day_quantifier + "," if days_energy_saved > 0 else "",
-                                                             str(
+               "60 watt light bulb on for {}{}{}. ".format(total_energy,
+                                                           str(
+                                                               days_energy_saved) + " " + day_quantifier if days_energy_saved > 0 else "",
+                                                           str(
 
-                                                                 hours_energy_saved) + " " + hour_quantifier + ", and" if hours_energy_saved > 0 else "",
-                                                             str(
+                                                               hours_energy_saved) + " " + hour_quantifier if hours_energy_saved > 0 else "",
+                                                           str(
 
-                                                                 minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
+                                                               minutes_energy_saved) + " " + minute_quantifier if minutes_energy_saved > 0 else "")
+
+
+# API Requests
+# GET POWERMETER
+def send_get_powermeter_request():
+    try:
+        response = requests.get(
+            url=BASE_URL + "devices/powermeter/",
+            headers={
+                "Authorization": API_TOKEN,
+                "Cookie": COOKIE,
+            },
+        )
+        print('Response HTTP Status Code: {status_code}'.format(
+            status_code=response.status_code))
+        print('Response HTTP Response Body: {content}'.format(
+            content=response.content))
+        return response.json().get('powermeters')[0].get('grid_activepower')
+    except requests.exceptions.RequestException:
+        print('HTTP Request failed')
+        return "Hive was unable to get the request information"
+
+
+# POST: AC Control-ON/OFF
+def send_toggle_eco_mode_request(eco_mode_on):
+    print('Send toggle eco mode request, eco_mode_on: ' + str(eco_mode_on))
+
+    status = "OFF"
+    if eco_mode_on:
+        status = "ON"
+
+    try:
+        response = requests.post(
+            url=BASE_URL + "devicecontrol/",
+            headers={
+                "Authorization": API_TOKEN,
+                "Content-Type": "application/json; charset=utf-8",
+                "Cookie": COOKIE,
+            },
+            data=json.dumps({
+                "topic": "hivecdf12345",
+                "message": {
+                    "status": status,
+                    "device": "01DAI1200101",
+                    "type": "devicecontrol"
+                }
+            })
+        )
+        print('Response HTTP Status Code: {status_code}'.format(
+            status_code=response.status_code))
+        print('Response HTTP Response Body: {content}'.format(
+            content=response.content))
+        return response.json().get('result') == 'success'
+    except requests.exceptions.RequestException:
+        print('HTTP Request failed')
+        return False
+
+
+# GET Historical
+def send_get_historical_data_request(days):
+    # Get 2 hour slice of data from a week ago
+    today = datetime.today()
+    past_start = today - timedelta(days=days)
+    past_end = past_start + timedelta(hours=2)
+    past_start_formatted = past_start.strftime('%Y-%m-%d %H:%M')
+    past_end_formatted = past_end.strftime('%Y-%m-%d %H:%M')
+
+    print("Start: %s" % past_start_formatted)
+    print("End: %s" % past_end_formatted)
+
+    try:
+        response = requests.get(
+            url=BASE_URL + "historyenergy",
+            params={
+                "started_at": past_start_formatted,
+                "ended_at": past_end_formatted,
+                "device_id": "05CRE0250883398",
+            },
+            headers={
+                "Authorization": API_TOKEN,
+                "Cookie": COOKIE,
+            },
+        )
+        print('Response HTTP Status Code: {status_code}'.format(
+            status_code=response.status_code))
+        print('Response HTTP Response Body: {content}'.format(
+            content=response.content))
+        return response.json().get('result')
+    except requests.exceptions.RequestException:
+        print('HTTP Request failed')
+
+
+# POST: AC control-temp
+def send_post_control_temp_request(temp):
+    try:
+        response = requests.post(
+            url=BASE_URL + "devicecontrol/",
+            headers={
+                "Authorization": API_TOKEN,
+                "Content-Type": "application/json; charset=utf-8",
+                "Cookie": COOKIE,
+            },
+            data=json.dumps({
+                "topic": "hivecdf12345",
+                "message": {
+                    "type": "devicecontrol",
+                    "device": "01DAI1200101",
+                    "stemp": temp
+                }
+            })
+        )
+        print('Response HTTP Status Code: {status_code}'.format(
+            status_code=response.status_code))
+        print('Response HTTP Response Body: {content}'.format(
+            content=response.content))
+        return response.json().get('result') == 'success'
+    except requests.exceptions.RequestException:
+        print('HTTP Request failed')

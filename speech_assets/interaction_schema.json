@@ -99,6 +99,7 @@
                     "name": "Summary",
                     "slots": [],
                     "samples": [
+                        "How I'm doing",
                         "How am I doing"
                     ]
                 },
@@ -106,6 +107,9 @@
                     "name": "YesIntent",
                     "slots": [],
                     "samples": [
+                        "sure",
+                        "yeah",
+                        "oh hell yeah",
                         "yes please",
                         "yes"
                     ]
@@ -114,8 +118,29 @@
                     "name": "NoIntent",
                     "slots": [],
                     "samples": [
+                        "nah",
+                        "nope",
+                        "oh hell no",
                         "no thank you",
                         "no"
+                    ]
+                },
+                {
+                    "name": "SetTemperatureIntent",
+                    "slots": [
+                        {
+                            "name": "temperatureNum",
+                            "type": "TEMPERATURE_NUM"
+                        }
+                    ],
+                    "samples": [
+                        "change temperature to {temperatureNum}",
+                        "set temperature to {temperatureNum}",
+                        "set air conditioner temperature to {temperatureNum} degrees",
+                        "set ac temperature to {temperatureNum} degrees",
+                        "set temperature to {temperatureNum} degrees",
+                        "change air conditioner temperature to {temperatureNum} degrees",
+                        "change ac temperature to {temperatureNum} degrees"
                     ]
                 }
             ],
@@ -193,6 +218,18 @@
                     "name": "INFORMATION_CATEGORY",
                     "values": [
                         {
+                            "id": "POW",
+                            "name": {
+                                "value": "current energy usage",
+                                "synonyms": [
+                                    "current power usage",
+                                    "power",
+                                    "power am I using",
+                                    "energy usage"
+                                ]
+                            }
+                        },
+                        {
                             "id": "TIP",
                             "name": {
                                 "value": "suggestions",
@@ -214,8 +251,6 @@
                                 "synonyms": [
                                     "total energy saved",
                                     "energy have I saved",
-                                    "energy usage",
-                                    "usage",
                                     "running total",
                                     "energy savings",
                                     "current energy saved"
@@ -240,9 +275,134 @@
                             "name": {
                                 "value": "eco",
                                 "synonyms": [
+                                    "eco mode status",
+                                    "current eco mode session",
+                                    "eco mode session",
                                     "eco mode running",
                                     "eco mode",
                                     "energy saver"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "TEMPERATURE_NUM",
+                    "values": [
+                        {
+                            "id": "17",
+                            "name": {
+                                "value": "17",
+                                "synonyms": [
+                                    "seventeen"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "16",
+                            "name": {
+                                "value": "16",
+                                "synonyms": [
+                                    "sixteen"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "28",
+                            "name": {
+                                "value": "28",
+                                "synonyms": [
+                                    "twenty eight"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "27",
+                            "name": {
+                                "value": "27",
+                                "synonyms": [
+                                    "twenty seven"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "26",
+                            "name": {
+                                "value": "26",
+                                "synonyms": [
+                                    "twenty six"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "25",
+                            "name": {
+                                "value": "25",
+                                "synonyms": [
+                                    "twenty five"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "24",
+                            "name": {
+                                "value": "24",
+                                "synonyms": [
+                                    "twenty four"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "23",
+                            "name": {
+                                "value": "23",
+                                "synonyms": [
+                                    "twenty three"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "22",
+                            "name": {
+                                "value": "22",
+                                "synonyms": [
+                                    "twenty two"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "21",
+                            "name": {
+                                "value": "21",
+                                "synonyms": [
+                                    "twenty one"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "20",
+                            "name": {
+                                "value": "20",
+                                "synonyms": [
+                                    "twenty"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "19",
+                            "name": {
+                                "value": "19",
+                                "synonyms": [
+                                    "nineteen"
+                                ]
+                            }
+                        },
+                        {
+                            "id": "18",
+                            "name": {
+                                "value": "18",
+                                "synonyms": [
+                                    "eighteen"
                                 ]
                             }
                         }
